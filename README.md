@@ -6,13 +6,14 @@ Home lab for deploying a web application with Docker Compose, Nginx, Drupal, and
 
 - Deploy a web application using Docker Compose
 - Configure communication between containers
-- Configure Nginx as a reverse proxy
 - Connect a containerized application to PostgreSQL running on the Docker host
-- Manage service configuration using environment variables
-- Use bind mounts for custom configuration
-- Configure persistent application data
 - Understand Docker Compose networking
-- Expose the website through a public IP address
+- Manage service configuration using environment variables
+- Configure persistent Drupal data
+- Use bind mounts for custom configuration
+- Configure Nginx as a reverse proxy
+- Expose the website over HTTP
+- Configure public access where available
 - Configure HTTPS
 - Verify service connectivity
 - Document troubleshooting and configuration decisions
@@ -32,13 +33,12 @@ Home lab for deploying a web application with Docker Compose, Nginx, Drupal, and
 | Database      | PostgreSQL system service |
 
 ## Architecture
-
 ```text
 Client
    |
    | HTTP / HTTPS
    v
-Public IP
+Server IP
    |
    v
 Nginx container
@@ -54,7 +54,6 @@ on Ubuntu host
 ```
 
 Docker-related part:
-
 ```text
 Ubuntu Server
 │
@@ -75,7 +74,6 @@ Ubuntu Server
 ## Project structure
 
 Planned project structure:
-
 ```text
 docker-compose-lab/
 ├── compose.yaml
@@ -92,43 +90,36 @@ docker-compose-lab/
 ## 1. Project setup
 
 Creating the project directory:
-
 ```bash
 mkdir docker-compose-lab
 ```
 
 Creating the directory for Nginx configuration:
-
 ```bash
 mkdir docker-compose-lab/nginx
 ```
 
 Entering the project directory:
-
 ```bash
 cd docker-compose-lab
 ```
 
 Checking the installed Docker Compose version:
-
 ```bash
 docker compose version
 ```
 
 Output:
-
 ```text
 Docker Compose version v5.4.0
 ```
 
 Creating the initial project files:
-
 ```bash
 touch compose.yaml .env .gitignore nginx/nginx.conf
 ```
 
 Checking the project structure:
-
 ```bash
 sudo apt install -y tree
 tree -a
@@ -150,25 +141,21 @@ tree -a
 PostgreSQL is installed directly on the Ubuntu host rather than running inside Docker.
 
 Checking the PostgreSQL service status:
-
 ```bash
 sudo systemctl status postgresql --no-pager
 ```
 
 Checking the PostgreSQL version:
-
 ```bash
 psql -V
 ```
 
 Checking which address and port PostgreSQL is listening on:
-
 ```bash
 sudo ss -ltnp | grep postgres
 ```
 
 Checking the current PostgreSQL listening configuration:
-
 ```bash
 sudo -u postgres psql -c "SHOW listen_addresses;"
 sudo -u postgres psql -c "SHOW port;"
@@ -177,326 +164,270 @@ sudo -u postgres psql -c "SHOW port;"
 ### Database creation
 
 Connecting to PostgreSQL:
-
 ```bash
-# TODO
+sudo -u postgres psql
 ```
 
 Creating a database for Drupal:
-
 ```sql
--- TODO
+create database drupal_base;
 ```
 
 Creating a dedicated PostgreSQL user:
-
 ```sql
--- TODO
+create user drupal_user with password 'p@ssw0rd';
 ```
 
-Granting the required privileges:
-
+Assigning database ownership:
 ```sql
--- TODO
+alter database drupal_base owner to drupal_user;
 ```
 
 Verifying the created database and user:
-
 ```sql
--- TODO
+\l
+\du
+\q
 ```
 
 ---
 
-## 3. PostgreSQL access from Docker
+## 3. Environment variables
 
-By default, PostgreSQL running on the host must be configured to accept connections from Docker containers.
-
-Checking Docker networks:
-
+Editing the environment file:
 ```bash
-# TODO
+vim .env
 ```
 
-Determining the Docker network address range:
-
-```bash
-# TODO
-```
-
-Configuring PostgreSQL `listen_addresses`:
-
-```text
-# TODO
-```
-
-Configuring `pg_hba.conf` to allow connections from the Docker network:
-
-```text
-# TODO
-```
-
-Restarting PostgreSQL:
-
-```bash
-# TODO
-```
-
-Checking that PostgreSQL is listening on port `5432`:
-
-```bash
-# TODO
-```
-
-Testing PostgreSQL connectivity before deploying Drupal:
-
-```bash
-# TODO
-```
-
----
-
-## 4. Environment variables
-
-Creating the environment file:
-
-```bash
-# TODO
-```
-
-Planned variables:
-
+Defining local configuration:
 ```dotenv
-# TODO
+DRUPAL_IMAGE=drupal:latest
+NGINX_IMAGE=nginx:alpine
+HTTP_PORT=80
+POSTGRES_HOST=host.docker.internal
+POSTGRES_PORT=5432
+POSTGRES_DB=drupal_base
+POSTGRES_USER=drupal_user
+POSTGRES_PASSWORD=p@ssw0rd
 ```
 
-The `.env` file contains local configuration and credentials and must not be committed to the repository.
+The .env file contains local configuration and credentials and must not be committed to the repository.
 
-Creating `.gitignore`:
-
+Adding .env to .gitignore:
 ```bash
-# TODO
+vim .gitignore
 ```
-
-Adding `.env` to `.gitignore`:
-
 ```text
 .env
 ```
 
 Creating a safe example configuration:
-
 ```bash
-# TODO
+cp .env .env.example
+vim .env.example
 ```
-
-Example structure:
-
 ```dotenv
-POSTGRES_DB=
-POSTGRES_USER=
+DRUPAL_IMAGE=drupal:latest
+NGINX_IMAGE=nginx:alpine
+HTTP_PORT=80
+POSTGRES_HOST=host.docker.internal
+POSTGRES_PORT=5432
+POSTGRES_DB=drupal_base
+POSTGRES_USER=drupal_user
 POSTGRES_PASSWORD=
 ```
 
 ---
 
-## 5. Docker Compose configuration
+## 4. Initial Docker Compose configuration
 
-Creating the Compose file:
-
+Creating the initial Compose configuration:
 ```bash
-# TODO
+vim compose.yaml
 ```
 
-Initial services:
-
-```yaml
-# TODO
-```
-
-The Compose stack will contain:
-
+At this stage, the stack contains only the Drupal service:
 ```text
-nginx
-drupal
+Docker Compose
+└── drupal
 ```
 
-PostgreSQL remains a system service on the Ubuntu host.
-
-Validating the Compose file:
-
-```bash
-# TODO
+Adding the Drupal service:
+```yaml
+services:
+  drupal:
+    image: ${DRUPAL_IMAGE}
 ```
 
-Checking the resolved Compose configuration:
+The Drupal container should not publish a web port directly because Nginx will become the external entry point later.
 
+Configuring access from Drupal to the Ubuntu host:
+```yaml
+services:
+  drupal:
+    image: ${DRUPAL_IMAGE}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+Configuring persistent Drupal application data:
+```yaml
+services:
+  drupal:
+    image: ${DRUPAL_IMAGE}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - drupal_sites:/var/www/html/sites
+      - drupal_modules:/var/www/html/modules
+      - drupal_themes:/var/www/html/themes
+volumes:
+  drupal_sites:
+  drupal_modules:
+  drupal_themes:
+```
+
+PostgreSQL storage is not configured here because PostgreSQL runs directly on the Ubuntu host.
+
+Checking the resolved configuration:
 ```bash
-# TODO
+sudo docker compose config
 ```
 
 ---
 
-## 6. Drupal service
+## 5. First Compose start and networking
 
-Adding the Drupal service to `compose.yaml`:
-
-```yaml
-# TODO
-```
-
-The Drupal container should not be directly exposed to the Internet.
-
-Expected traffic flow:
-
-```text
-Nginx
-   |
-   v
-Drupal:80
-```
-
-Configuring access to the PostgreSQL host:
-
-```yaml
-# TODO
-```
-
-Configuring persistent Drupal data:
-
-```yaml
-# TODO
-```
-
-Starting Drupal:
-
+Starting the Drupal service:
 ```bash
-# TODO
+sudo docker compose up -d
 ```
 
-Checking the container:
-
+Checking running Compose projects:
 ```bash
-# TODO
+sudo docker compose ls
 ```
 
-Checking Drupal logs:
-
+Checking running containers:
 ```bash
-# TODO
+sudo docker ps
 ```
 
----
-
-## 7. Docker Compose networking
-
-Starting the current stack:
-
-```bash
-# TODO
-```
-
-Checking Compose services:
-
-```bash
-# TODO
-```
+Docker Compose creates a project network when the service is started.
 
 Checking Docker networks:
-
 ```bash
-# TODO
+sudo docker network ls
 ```
 
-Inspecting the network created by Docker Compose:
-
+Inspecting the Compose network:
 ```bash
-# TODO
+sudo docker network inspect docker-compose-lab_default
+```
+
+Determining the Docker network address range:
+```text
+Subnet: 172.18.0.0/16
+Gateway: 172.18.0.1
 ```
 
 Checking the Drupal container network configuration:
+```bash
+sudo docker container inspect docker-compose-lab-drupal-1
+```
 
+Container IP:
+```text
+172.18.0.2
+```
+
+Checking external name resolution from the Drupal container:
+```bash
+sudo docker exec docker-compose-lab-drupal-1 getent hosts google.com
+```
+
+Resolving the Ubuntu host name from the Drupal container:
+```bash
+sudo docker exec docker-compose-lab-drupal-1 getent hosts host.docker.internal
+```
+
+Output:
+```text
+172.17.0.1      host.docker.internal
+```
+
+---
+
+## 6. PostgreSQL access from Docker
+
+Now that the Compose network exists and its subnet is known, PostgreSQL can be configured to accept connections from it.
+
+PostgreSQL currently listens only on `127.0.0.1:5432`. Access from Docker remains TODO.
+
+Checking the active PostgreSQL configuration files:
 ```bash
 # TODO
 ```
 
-Testing DNS resolution inside the Compose network:
+Configuring PostgreSQL `listen_addresses` to accept connections on `172.17.0.1`:
+```text
+# TODO
+```
 
+Configuring `pg_hba.conf` to allow connections from the Compose subnet `172.18.0.0/16`:
+```text
+# TODO
+```
+
+The PostgreSQL port should be available to the required Docker network but should not be unnecessarily exposed to the Internet.
+
+Restarting PostgreSQL:
 ```bash
 # TODO
 ```
 
-Testing access from the container to the Ubuntu host:
-
+Checking PostgreSQL status:
 ```bash
 # TODO
 ```
 
-Testing access to PostgreSQL port `5432`:
+Checking that the PostgreSQL listener covers `172.17.0.1:5432`:
+```bash
+# TODO
+```
 
+Testing access to PostgreSQL port `5432` from Docker:
+```bash
+# TODO
+```
+
+Testing authentication using the Drupal database credentials:
 ```bash
 # TODO
 ```
 
 ---
 
-## 8. Drupal database connection
+## 7. Nginx configuration
 
-Opening the Drupal installer:
-
-```text
-http://<SERVER_IP>:<TEMPORARY_PORT>
-```
-
-Database configuration:
-
-```text
-Database type: PostgreSQL
-Database name: TODO
-Database username: TODO
-Database password: stored in .env
-Database host: TODO
-Database port: 5432
-```
-
-Completing the Drupal installation:
-
-```text
-TODO
-```
-
-Verifying that Drupal created its database tables:
-
-```sql
--- TODO
-```
-
----
-
-## 9. Nginx configuration
-
-Creating the Nginx configuration file:
-
+Creating the Nginx configuration:
 ```bash
 # TODO
 ```
 
 File:
-
 ```text
 nginx/nginx.conf
 ```
 
 Initial configuration:
-
 ```nginx
 # TODO
 ```
 
-The upstream should point to the Drupal service using its Docker Compose service name.
+The upstream should point to the Drupal Compose service by its service name.
 
-Expected internal traffic:
-
+Internal traffic:
 ```text
 nginx:80
    |
@@ -506,54 +437,21 @@ drupal:80
 
 ---
 
-## 10. Bind mount
+## 8. Bind mount and reverse proxy
 
-The custom Nginx configuration will be stored on the host and mounted into the container.
-
-Adding the bind mount to `compose.yaml`:
-
+Adding Nginx to `compose.yaml`:
 ```yaml
 # TODO
 ```
 
-Starting Nginx:
-
-```bash
-# TODO
-```
-
-Checking the Nginx container:
-
-```bash
-# TODO
-```
-
-Checking the mounted configuration:
-
-```bash
-# TODO
-```
-
-Checking Nginx configuration syntax:
-
-```bash
-# TODO
-```
-
----
-
-## 11. Reverse proxy
-
-Adding Nginx to the full Compose stack:
-
+Mounting the custom Nginx configuration into the container:
 ```yaml
 # TODO
 ```
 
-Only Nginx should publish the web port to the host.
+Only Nginx should publish the web port to the Ubuntu host.
 
 Expected architecture:
-
 ```text
 host:80
    |
@@ -565,141 +463,167 @@ drupal:80
 ```
 
 Starting the complete stack:
-
 ```bash
 # TODO
 ```
 
 Checking services:
+```bash
+# TODO
+```
 
+Checking the mounted Nginx configuration:
+```bash
+# TODO
+```
+
+Checking Nginx configuration syntax:
 ```bash
 # TODO
 ```
 
 Testing the reverse proxy locally:
-
 ```bash
 # TODO
 ```
 
 Checking Nginx logs:
-
 ```bash
 # TODO
 ```
 
 Checking Drupal logs:
-
 ```bash
 # TODO
 ```
 
 ---
 
-## 12. Persistent data
+## 9. Drupal installation and database connection
 
-Checking the storage currently used by Drupal:
+Opening the Drupal installer through Nginx:
+```text
+http://<SERVER_IP>
+```
 
+Database configuration:
+```text
+Database type: PostgreSQL
+Database name: TODO
+Database username: TODO
+Database password: stored in .env
+Database host: TODO
+Database port: 5432
+```
+
+Completing the Drupal installation:
+```text
+TODO
+```
+
+Verifying that the Drupal website is available:
+```text
+TODO
+```
+
+Connecting to PostgreSQL:
 ```bash
 # TODO
 ```
 
-Adding persistent storage:
-
-```yaml
-# TODO
+Verifying that Drupal created its database tables:
+```sql
+-- TODO
 ```
 
-Checking Docker volumes:
+---
 
+## 10. Persistent data verification
+
+PostgreSQL data is stored by the PostgreSQL service on the Ubuntu host.
+
+This section verifies persistence of Drupal files managed by Docker.
+
+Checking configured Docker volumes:
 ```bash
 # TODO
 ```
 
-Inspecting the volume:
-
+Inspecting the Drupal volume:
 ```bash
 # TODO
 ```
 
-Testing persistence:
+Creating or modifying content in Drupal:
+```text
+TODO
+```
 
-1. Create or modify content in Drupal.
-2. Stop and remove the containers.
-3. Start the stack again.
-4. Verify that the data is still available.
-
-Stopping the stack:
-
+Stopping and removing the Compose containers:
 ```bash
 # TODO
 ```
 
-Starting it again:
-
+Checking that the containers were removed:
 ```bash
 # TODO
+```
+
+Starting the stack again:
+```bash
+# TODO
+```
+
+Verifying that the Drupal configuration and content are still available:
+```text
+TODO
 ```
 
 Result:
-
 ```text
 TODO
 ```
 
 ---
 
-## 13. Public access
+## 11. Network access
 
-Checking the server network configuration:
-
+Checking the Ubuntu network configuration:
 ```bash
 # TODO
 ```
 
 Checking listening ports:
-
 ```bash
 # TODO
 ```
 
-Expected web listener:
-
+Expected HTTP listener:
 ```text
 0.0.0.0:80
 ```
 
-Testing locally from Ubuntu:
-
+Testing from the Ubuntu VM:
 ```bash
 # TODO
 ```
 
-Testing through the server IP:
-
+Testing from the MacBook:
 ```bash
 # TODO
 ```
 
-Testing from another machine:
-
-```bash
-# TODO
-```
-
-Expected result:
-
+Expected result on the local network:
 ```text
-http://<PUBLIC_IP>
+http://<SERVER_IP>
 ```
 
-The request path should be:
-
+Request path:
 ```text
-Client
+MacBook
    |
    v
-Public IP:80
+Ubuntu VM:80
    |
    v
 Nginx
@@ -713,24 +637,80 @@ PostgreSQL
 
 ---
 
-## 14. HTTPS
+## 12. Public access
 
-HTTPS should be configured only after the website works correctly over HTTP.
+Public access depends on the network configuration outside the Ubuntu VM.
+
+Checking the current public IP:
+```bash
+# TODO
+```
+
+Checking whether inbound connections can reach the server:
+```text
+TODO
+```
+
+Possible requirements:
+```text
+Public IP
+Router/NAT port forwarding
+Host firewall configuration
+Provider firewall configuration
+```
+
+Testing external HTTP access:
+```text
+http://<PUBLIC_IP>
+```
+
+Result:
+```text
+TODO
+```
+
+If the environment does not provide a reachable public IP, this stage can be reproduced later on a VPS.
+
+---
+
+## 13. HTTPS
+
+HTTPS should be configured only after HTTP access works correctly.
 
 Planned domain:
-
 ```text
 TODO
 ```
 
 DNS record:
-
 ```text
 TODO
 ```
 
-Expected final traffic flow:
+Expected DNS mapping:
+```text
+domain
+   |
+   v
+public IP
+```
 
+Checking DNS resolution:
+```bash
+# TODO
+```
+
+Obtaining a TLS certificate:
+```bash
+# TODO
+```
+
+Configuring Nginx for HTTPS:
+```nginx
+# TODO
+```
+
+Expected traffic:
 ```text
 Client
    |
@@ -743,170 +723,128 @@ Nginx
 Drupal
 ```
 
-Checking DNS resolution:
-
-```bash
-# TODO
-```
-
-Obtaining a TLS certificate:
-
-```bash
-# TODO
-```
-
-Configuring Nginx for HTTPS:
-
-```nginx
-# TODO
-```
-
 Testing HTTPS:
-
 ```bash
 # TODO
 ```
 
 Testing HTTP to HTTPS redirect:
-
 ```bash
 # TODO
 ```
 
 Expected result:
-
 ```text
 https://<DOMAIN>
 ```
 
 ---
 
-## 15. Verification
+## 14. Verification
 
 Checking running Compose services:
-
 ```bash
 # TODO
 ```
 
 Checking containers:
-
 ```bash
 # TODO
 ```
 
 Checking Docker networks:
-
 ```bash
 # TODO
 ```
 
 Checking listening ports:
-
 ```bash
 # TODO
 ```
 
 Checking the website:
-
 ```bash
 # TODO
 ```
 
 Checking the reverse proxy:
-
 ```bash
 # TODO
 ```
 
-Checking PostgreSQL connectivity:
-
+Checking PostgreSQL connectivity from Docker:
 ```bash
 # TODO
 ```
 
-Checking application data in PostgreSQL:
-
+Checking Drupal data in PostgreSQL:
 ```sql
 -- TODO
 ```
 
 Checking Nginx logs:
-
 ```bash
 # TODO
 ```
 
 Checking Drupal logs:
-
 ```bash
 # TODO
 ```
 
 ---
 
-## 16. Stack management
+## 15. Stack management
 
 Starting the stack:
-
 ```bash
 docker compose up -d
 ```
 
 Checking service status:
-
 ```bash
 docker compose ps
 ```
 
 Viewing logs:
-
 ```bash
 docker compose logs
 ```
 
 Following logs in real time:
-
 ```bash
 docker compose logs -f
 ```
 
 Viewing logs for a specific service:
-
 ```bash
 docker compose logs nginx
 ```
-
 ```bash
 docker compose logs drupal
 ```
 
 Stopping the services without removing them:
-
 ```bash
 docker compose stop
 ```
 
 Starting stopped services:
-
 ```bash
 docker compose start
 ```
 
 Restarting services:
-
 ```bash
 docker compose restart
 ```
 
 Stopping and removing the stack:
-
 ```bash
 docker compose down
 ```
 
 Checking the resolved configuration:
-
 ```bash
 docker compose config
 ```
@@ -918,13 +856,11 @@ docker compose config
 ## Drupal cannot connect to PostgreSQL
 
 Symptoms:
-
 ```text
 TODO
 ```
 
 Diagnosis:
-
 ```bash
 # TODO
 ```
@@ -935,13 +871,12 @@ Things to check:
 - `listen_addresses`
 - `pg_hba.conf`
 - PostgreSQL port `5432`
-- Docker network subnet
-- host address used by the Drupal container
+- Compose network subnet
+- Docker host address used by Drupal
 - PostgreSQL username and password
 - host firewall
 
 Solution:
-
 ```text
 TODO
 ```
@@ -951,13 +886,11 @@ TODO
 ## Nginx returns `502 Bad Gateway`
 
 Symptoms:
-
 ```text
 TODO
 ```
 
 Diagnosis:
-
 ```bash
 # TODO
 ```
@@ -973,7 +906,6 @@ Things to check:
 - Docker network connectivity
 
 Solution:
-
 ```text
 TODO
 ```
@@ -983,35 +915,38 @@ TODO
 ## Container cannot reach the Docker host
 
 Symptoms:
-
 ```text
 TODO
 ```
 
 Diagnosis:
-
 ```bash
 # TODO
 ```
 
-Solution:
+Things to check:
 
+- Compose network
+- host gateway configuration
+- PostgreSQL listening address
+- `pg_hba.conf`
+- firewall
+
+Solution:
 ```text
 TODO
 ```
 
 ---
 
-## Website works locally but is not publicly accessible
+## Website works on Ubuntu but not from the MacBook
 
 Symptoms:
-
 ```text
 TODO
 ```
 
 Diagnosis:
-
 ```bash
 # TODO
 ```
@@ -1022,12 +957,38 @@ Things to check:
 - Docker port publishing
 - `ss -tlnp`
 - Ubuntu firewall
-- network/router configuration
-- VPS/provider firewall if applicable
-- public IP routing
+- UTM network configuration
 
 Solution:
+```text
+TODO
+```
 
+---
+
+## Website works locally but is not publicly accessible
+
+Symptoms:
+```text
+TODO
+```
+
+Diagnosis:
+```bash
+# TODO
+```
+
+Things to check:
+
+- public IP availability
+- router/NAT configuration
+- port forwarding
+- host firewall
+- provider firewall
+- CGNAT
+- public routing
+
+Solution:
 ```text
 TODO
 ```
@@ -1037,19 +998,16 @@ TODO
 ## Environment variables are not resolved
 
 Symptoms:
-
 ```text
 TODO
 ```
 
 Checking the resolved Compose configuration:
-
 ```bash
 docker compose config
 ```
 
 Solution:
-
 ```text
 TODO
 ```
@@ -1059,19 +1017,16 @@ TODO
 ## Nginx configuration error
 
 Checking configuration syntax:
-
 ```bash
 # TODO
 ```
 
 Checking logs:
-
 ```bash
 # TODO
 ```
 
 Solution:
-
 ```text
 TODO
 ```
@@ -1081,22 +1036,24 @@ TODO
 # Result
 
 The completed lab should provide the following architecture:
-
 ```text
-Internet
+Client
    |
-   | HTTPS
+   | HTTP / HTTPS
    v
-Nginx
-   |
-   v
-Drupal
+Nginx container
    |
    v
-PostgreSQL
+Drupal container
+   |
+   v
+PostgreSQL service
+on Ubuntu host
 ```
 
-The website should be accessible through a public IP address and, after DNS and TLS configuration, through a domain over HTTPS.
+The website should first be accessible from the host network over HTTP.
+
+Where a reachable public IP and domain are available, the same application can then be exposed publicly over HTTPS.
 
 The lab demonstrates practical experience with:
 
@@ -1104,7 +1061,9 @@ The lab demonstrates practical experience with:
 - Docker Compose
 - Linux containers
 - Docker networking
+- container-to-host networking
 - PostgreSQL
+- Drupal
 - Nginx
 - reverse proxy configuration
 - environment variables
@@ -1112,5 +1071,5 @@ The lab demonstrates practical experience with:
 - persistent storage
 - container logs
 - HTTP/HTTPS
-- public service deployment
+- service deployment
 - troubleshooting
